@@ -56,6 +56,7 @@ def get_transaction_alive_dead(year: int, month: int, inactivity_days: int, df_t
     df_dead = df_dated[df_dated['partner'].isin(partners_dead)]
     return df_alive, df_dead
 
+
 def get_rfm_data(year: int, month: int, inactivity_days: int, df_transaction: pd.DataFrame):
     """
     Returns RFM data on two large clusters: alive and dead clients.
