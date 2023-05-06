@@ -80,3 +80,111 @@ def get_rfm_data(year: int, month: int, inactivity_days: int, df_transaction: pd
     else:
         df_rfm_dead = None
     return df_rfm_alive, df_rfm_dead
+
+
+def RScore(x, p, d):
+    if x <= d[p][0.20]:
+        return 5
+    elif x <= d[p][0.40]:
+        return 4
+    elif x <= d[p][0.60]:
+        return 3
+    elif x <= d[p][0.80]:
+        return 2
+    else:
+        return 1
+
+
+def FnMScoring(x, p, d):
+    if x <= d[p][0.20]:
+        return 1
+    elif x <= d[p][0.40]:
+        return 2
+    elif x <= d[p][0.60]:
+        return 3
+    elif x <= d[p][0.80]:
+        return 4
+    else:
+        return 5
+
+
+def get_rfm_cluster_alive(df):
+  df['R'] = df['recency'].apply(RScore, args=('recency',quantiles,))
+  df['F'] = df['frequency'].apply(FnMScoring, args=('frequency',quantiles,))
+  df['M'] = df['monetary_value'].apply(FnMScoring, args=('monetary_value',quantiles,))
+  df['RFMScore'] = df.R.map(str) + df.F.map(str) + df.M.map(str)
+  return df
+
+
+def get_rfm_cluster_dead(df):
+  df['R'] = "0"
+  df['F'] = "0"
+  df['M'] = "0"
+  df['RFMScore'] = "000"
+  return df
+
+
+def set_cluster_categoty(df):
+  seg_map = {
+      r'00': '0',
+      r'[1-2][1-2]': '1',
+      r'[1-2][3-4]': '2',
+      r'[1-2]5': '3',
+      r'3[1-2]': '4',
+      r'33': '5',
+      r'[3-4][4-5]': '6',
+      r'41': '7',
+      r'51': '8',
+      r'[4-5][2-3]': '9',
+      r'5[4-5]': '10'
+  }
+  df['Cluster'] = df['R'].astype(str) + df['F'].astype(str)
+  df['Cluster'] = df['Cluster'].replace(seg_map, regex=True)
+  return df
+
+
+df = pd.read_parquet("wallet_urfu.parquet.gzip")
+df_final = pd.DataFrame()
+
+for year in range(2022, 2023):
+    for month in range(1, 13):
+        if year == 2023:
+            if month == 3:
+                break
+
+        df_alive, df_dead = get_rfm_data(year, month, 95, df)
+
+        quantiles = df_alive.quantile(q=[0.20, 0.40, 0.60, 0.80])
+        quantiles = quantiles.to_dict()
+
+        df_alive = get_rfm_cluster_alive(df_alive)
+        df_dead = get_rfm_cluster_dead(df_dead)
+
+        df_sum = df_alive.append(df_dead)
+        df_sum = set_cluster_categoty(df_sum)
+
+        df_sum = df_sum.groupby('Cluster').agg({'monetary_value': ['sum', 'count']})
+        df_sum['year'] = year
+        df_sum['month'] = month
+        df_final = df_final.append(df_sum)
+
+        print(f'''{datetime.now()} Год {year}, месяц {month} окончен''')
+
+
+df_final = df_final.dropna()
+df_final = df_final.rename(columns={'monetary_value.1': 'partner_count', 'Unnamed: 0': 'Cluster'})
+seg_map_names = {
+      '0': 'Ушедшие',
+      '1': 'Бездействующие',
+      '2': 'Зона риска',
+      '3': 'Не должны потерять',
+      '4': 'Засыпающие',
+      '5': 'Нуждающиеся во внимании',
+      '6': 'Лояльные клиенты',
+      '7': 'Перспективные клиенты',
+      '8': 'Новые клиенты',
+      '9': 'Потенциально лояльные',
+      '10': 'VIP'
+  }
+df_final['Cluster_name'] = df_final['Cluster'].replace(seg_map_names)
+df_final.to_csv('data_clustered_by_month.csv', encoding='utf-8', index=False)
